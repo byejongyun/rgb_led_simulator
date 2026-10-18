@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic RGB LED Circuit Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 폰트 로드: JetBrains Mono (숫자/기호용), Pretendard (본문 설명용) -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    
+    <style>
+        :root {
+            --val-r: 0;
+            --val-g: 0;
+            --val-b: 0;
+            --rgb-color: rgb(0, 0, 0);
+            --glow-spread: 0px;
+        }
+
+        body {
+            background-color: #111;
+            font-family: 'JetBrains Mono', monospace;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: hidden;
+            user-select: none;
+            background-image: radial-gradient(#222 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        /* 프리텐다드 폰트 유틸리티 클래스 */
+        .font-pretendard {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+        }
+
+        /* 
+         * PCB Base (Fixed Aspect Ratio for perfect SVG routing)
+         */
+        .pcb-board {
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 3 / 4; /* 600x800 internal coordinate space */
+            background-color: #132a18; 
+            border-radius: 12px;
+            box-shadow: 
+                0 20px 50px rgba(0,0,0,0.8),
+                inset 0 2px 3px rgba(255,255,255,0.1),
+                inset 0 -2px 5px rgba(0,0,0,0.5);
+            position: relative;
+            border: 2px solid #0f1c11;
+        }
+
+        .pcb-board::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: 
+                linear-gradient(rgba(45, 80, 50, 0.4) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(45, 80, 50, 0.4) 1px, transparent 1px);
+            background-size: 20px 20px;
+            z-index: 0;
+            pointer-events: none;
+            border-radius: 10px;
+        }
+
+        /* Interactive Components Hover Styles */
+        .interactive-comp {
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border-radius: 8px;
+        }
+        
+        div.interactive-comp:hover {
+            transform: translate(-50%, -50%) scale(1.02) !important;
+        }
+        
+        div.interactive-comp::before {
+            content: '';
+            position: absolute;
+            inset: -15px;
+            border-radius: 12px;
+            border: 2px dashed transparent;
+            transition: all 0.2s ease;
+            pointer-events: none;
+            z-index: -1;
+        }
+        
+        div.interactive-comp:hover::before {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Thematic Glows for different components on hover */
+        .comp-battery:hover::before { border-color: rgba(248, 113, 113, 0.5); }
+        .comp-mcu:hover::before { border-color: rgba(96, 165, 250, 0.5); }
+        .comp-led:hover::before { border-color: rgba(192, 132, 252, 0.5); }
+        .comp-slider:hover::before { border-color: rgba(74, 222, 128, 0.5); }
+
+        /* SVG Traces */
+        .svg-trace {
+            fill: none;
+            stroke: #a89442;
+            stroke-width: 4;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+            filter: drop-shadow(0px 1px 1px rgba(0,0,0,0.5));
+            transition: stroke 0.2s, filter 0.2s;
+            pointer-events: auto;
+        }
+        g[data-info="trace"]:hover .svg-trace {
+            stroke: #fcd34d;
+            filter: drop-shadow(0px 0px 6px rgba(252,211,77,0.9));
+        }
+
+        /* Hardware text */
+        .silkscreen {
+            color: #e5e7eb;
+            font-weight: 700;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+            letter-spacing: 0.05em;
+            text-align: center;
+        }
+
+        /* IC Chip */
+        .chip {
+            background: #1a1a1a;
+            border-radius: 4px;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 2px 4px 6px rgba(0,0,0,0.6);
+            position: relative;
+        }
+        .chip::after {
+            content: '';
+            position: absolute;
+            top: 6px; left: 6px;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #111;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+        }
+        
+        .smd-resistor {
+            width: 6px; height: 12px; background: #000;
+            border-top: 2px solid silver; border-bottom: 2px solid silver;
+            box-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+
+        /* LED Cluster */
+        .led-module-container {
+            position: relative;
+            width: 180px; height: 180px;
+            border-radius: 50%;
+            background: #0f110f;
+            border: 6px solid #2a2a2a;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.8), inset 0 5px 15px rgba(0,0,0,0.9), 0 0 0 2px #444;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .diode-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 2px; padding: 8px; border-radius: 50%;
+            clip-path: circle(48% at 50% 50%); background: #050505;
+        }
+        .diode {
+            width: 12px; height: 12px; background-color: #111;
+            border-radius: 2px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+        }
+        .diode.r-die { background-color: rgba(255, 30, 30, calc(0.1 + (var(--val-r) * 0.9))); }
+        .diode.g-die { background-color: rgba(30, 255, 30, calc(0.1 + (var(--val-g) * 0.9))); }
+        .diode.b-die { background-color: rgba(50, 100, 255, calc(0.1 + (var(--val-b) * 0.9))); }
+        .diode.r-die[style*="--val-r: 1"] { box-shadow: 0 0 8px red, inset 0 0 5px white; }
+
+        .diffuser-lens {
+            position: absolute; inset: 0; border-radius: 50%;
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.15), rgba(255,255,255,0.02) 60%, rgba(0,0,0,0.4));
+            box-shadow: inset 0 2px 10px rgba(255,255,255,0.2);
+            pointer-events: none; z-index: 25; transition: backdrop-filter 0.3s ease;
+        }
+
+        .ambient-glow {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100%; height: 100%; border-radius: 50%;
+            pointer-events: none; z-index: -1;
+            box-shadow: 0 0 var(--glow-spread) calc(var(--glow-spread) / 2) var(--rgb-color);
+            transition: box-shadow 0.1s;
+        }
+
+        /* Faders */
+        .fader-container {
+            height: 180px; width: 50px;
+            background: #111; border-radius: 4px; border: 1px solid #333;
+            box-shadow: inset 0 5px 15px rgba(0,0,0,0.9);
+            position: relative; display: flex; justify-content: center;
+        }
+        .fader-track-slot {
+            position: absolute; top: 20px; bottom: 20px; width: 6px;
+            background: #000; border-radius: 3px; box-shadow: inset 0 2px 5px rgba(0,0,0,1);
+        }
+        input[type=range].fader {
+            -webkit-appearance: none; appearance: none;
+            width: 140px; height: 40px; background: transparent;
+            transform: rotate(-90deg); position: absolute; top: 70px;
+            z-index: 10; outline: none; cursor: pointer;
+        }
+        input[type=range].fader::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 24px; height: 44px;
+            border: 1px solid #000; border-radius: 3px;
+            box-shadow: 0 5px 10px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.3);
+        }
+        #r-fader::-webkit-slider-thumb { background-image: linear-gradient(to right, #2a2a2a 0%, #444 15%, #2a2a2a 45%, #ff3b30 48%, #ff3b30 52%, #2a2a2a 55%, #444 85%, #2a2a2a 100%); }
+        #g-fader::-webkit-slider-thumb { background-image: linear-gradient(to right, #2a2a2a 0%, #444 15%, #2a2a2a 45%, #34c759 48%, #34c759 52%, #2a2a2a 55%, #444 85%, #2a2a2a 100%); }
+        #b-fader::-webkit-slider-thumb { background-image: linear-gradient(to right, #2a2a2a 0%, #444 15%, #2a2a2a 45%, #007aff 48%, #007aff 52%, #2a2a2a 55%, #444 85%, #2a2a2a 100%); }
+
+        /* Direct Input LCD */
+        input[type=text].lcd-display {
+            width: 65px;
+            background: #0a0e0a;
+            border: 2px solid #050705;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 4px 0;
+            border-radius: 4px;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+            text-align: center;
+            letter-spacing: 2px;
+            cursor: text;
+            outline: none;
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        input[type=text].lcd-display:focus {
+            box-shadow: 0 0 10px rgba(255,255,255,0.3), inset 0 2px 5px rgba(0,0,0,0.8);
+            border-color: #555;
+            background: #111;
+        }
+        input[type=text].red { color: #ff5555; text-shadow: 0 0 5px rgba(255,0,0,0.5); }
+        input[type=text].green { color: #55ff55; text-shadow: 0 0 5px rgba(0,255,0,0.5); }
+        input[type=text].blue { color: #55aaff; text-shadow: 0 0 5px rgba(0,100,255,0.5); }
+
+        .screw {
+            width: 8px; height: 8px; background: linear-gradient(45deg, #555, #ccc);
+            border-radius: 50%; position: absolute;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.5), 0 1px 1px rgba(255,255,255,0.1);
+        }
+        .screw::after {
+            content: ''; position: absolute; top: 3px; left: 1px; width: 6px; height: 1.5px;
+            background: #222; transform: rotate(45deg);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="pcb-board">
+        
+        <!-- SVG Copper Traces Layer (Perfectly aligned to components) -->
+        <svg viewBox="0 0 600 800" class="absolute inset-0 w-full h-full z-0 pointer-events-none" preserveAspectRatio="xMidYMid meet">
+            <!-- Group for hover and click events -->
+            <g class="interactive-comp" data-info="trace" style="cursor: pointer;">
+                <!-- Power: Battery (150, 96) to MCU (450, 96) -->
+                <path class="svg-trace" d="M 150 96 L 150 40 L 450 40 L 450 96" />
+                
+                <!-- Signal: MCU (450, 126) to LED (300, 270) -->
+                <path class="svg-trace" d="M 430 126 L 430 190 L 280 190 L 280 270" /> <!-- Red -->
+                <path class="svg-trace" d="M 450 126 L 450 210 L 300 210 L 300 270" /> <!-- Green -->
+                <path class="svg-trace" d="M 470 126 L 470 230 L 320 230 L 320 270" /> <!-- Blue -->
+
+                <!-- Feedback: LED (300, 450) to Sliders (120/300/480, 536) -->
+                <path class="svg-trace" d="M 260 450 L 260 500 L 120 500 L 120 536" /> <!-- Red -->
+                <path class="svg-trace" d="M 300 450 L 300 536" />                       <!-- Green -->
+                <path class="svg-trace" d="M 340 450 L 340 515 L 480 515 L 480 536" /> <!-- Blue -->
+
+                <!-- Invisible wider strokes to make clicking lines easier on mobile -->
+                <path d="M 150 96 L 150 40 L 450 40 L 450 96" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 430 126 L 430 190 L 280 190 L 280 270" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 450 126 L 450 210 L 300 210 L 300 270" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 470 126 L 470 230 L 320 230 L 320 270" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 260 450 L 260 500 L 120 500 L 120 536" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 300 450 L 300 536" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+                <path d="M 340 450 L 340 515 L 480 515 L 480 536" stroke="transparent" stroke-width="20" fill="none" pointer-events="stroke" />
+            </g>
+
+            <!-- UI Guide Line for Lens Switch (Visual Connection) -->
+            <g class="pointer-events-none opacity-80">
+                <!-- Dot on the edge of the LED module -->
+                <circle cx="395" cy="360" r="3.5" fill="rgba(255, 255, 255, 0.5)" />
+                <!-- Dashed guide line to the switch -->
+                <path d="M 395 360 L 420 360" fill="none" stroke="rgba(255, 255, 255, 0.5)" stroke-width="1.5" stroke-dasharray="3,3" />
+            </g>
+        </svg>
+
+        <!-- Components Map -->
+
+        <!-- 1. Battery Power Source -->
+        <div class="absolute z-10 flex flex-col items-center gap-2 interactive-comp comp-battery" style="left: 25%; top: 12%; transform: translate(-50%, -50%);" data-info="battery">
+            <div class="silkscreen text-[10px]">PWR_IN_9V</div>
+            <div class="w-16 h-12 bg-[#222] border-2 border-[#111] rounded shadow-lg flex flex-col justify-center items-center relative pointer-events-none">
+                <div class="absolute top-1 left-1 w-2 h-2 rounded-full bg-red-600 shadow-[0_0_5px_red]"></div>
+                <div class="flex gap-2 mt-2">
+                    <div class="w-2 h-4 bg-gray-400 rounded-sm"></div>
+                    <div class="w-2 h-4 bg-gray-400 rounded-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Microcontroller (IC) -->
+        <div class="absolute z-10 flex flex-col items-center gap-2 interactive-comp comp-mcu" style="left: 75%; top: 12%; transform: translate(-50%, -50%);" data-info="mcu">
+            <div class="silkscreen text-[10px]">RGB_CTRL_IC</div>
+            <div class="chip w-32 h-12 flex justify-between px-1 py-1 pointer-events-none">
+                <div class="flex flex-col justify-between h-full"><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div></div>
+                <div class="flex items-center text-[#555] text-[10px] font-bold rotate-180 tracking-widest">ATmega</div>
+                <div class="flex flex-col justify-between h-full"><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div><div class="w-2 h-1 bg-gray-400"></div></div>
+            </div>
+        </div>
+
+        <!-- 3. Output LED Module -->
+        <div class="absolute z-20 flex flex-col items-center gap-3 interactive-comp comp-led" style="left: 50%; top: 45%; transform: translate(-50%, -50%);" data-info="led">
+            <div class="silkscreen text-xs pointer-events-none">OPTICAL_RGB_BLEND_MODULE</div>
+            
+            <div class="led-module-container pointer-events-none" id="led-module">
+                <div class="ambient-glow" id="ambient-glow"></div>
+                <div class="diode-grid" id="diode-grid"></div>
+                <div class="diffuser-lens" id="diffuser-lens"></div>
+            </div>
+        </div>
+
+        <!-- 3.5. Lens Toggle Switch (Moved to the right of LED) -->
+        <div class="absolute z-30" style="left: 80%; top: 45%; transform: translate(-50%, -50%);">
+            <button id="toggle-lens" class="bg-[#222] border border-[#444] text-[#aaa] text-[11px] px-3 py-2 rounded shadow-[0_2px_5px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)] active:bg-[#111] hover:text-white transition-colors relative font-pretendard whitespace-nowrap tracking-wide">
+                빛 확산 렌즈 스위치
+            </button>
+        </div>
+
+        <!-- 4. Sliders (Faders & LCD Inputs) -->
+        
+        <!-- RED Slider -->
+        <div class="absolute z-20 flex flex-col items-center gap-2 interactive-comp comp-slider" style="left: 20%; top: 82%; transform: translate(-50%, -50%);" data-info="slider">
+            <input type="text" id="r-val" class="lcd-display red font-pretendard" value="000" maxlength="3" title="클릭하여 수치 입력 (0-255)">
+            <div class="fader-container">
+                <div class="fader-track-slot pointer-events-none"></div>
+                <input type="range" id="r-fader" class="fader" min="0" max="255" value="0">
+            </div>
+            <div class="silkscreen text-xl text-[#ff5555] pointer-events-none">R</div>
+            <div class="flex gap-1 mt-1 pointer-events-none"><div class="smd-resistor"></div><div class="smd-resistor"></div></div>
+        </div>
+
+        <!-- GREEN Slider -->
+        <div class="absolute z-20 flex flex-col items-center gap-2 interactive-comp comp-slider" style="left: 50%; top: 82%; transform: translate(-50%, -50%);" data-info="slider">
+            <input type="text" id="g-val" class="lcd-display green font-pretendard" value="000" maxlength="3" title="클릭하여 수치 입력 (0-255)">
+            <div class="fader-container">
+                <div class="fader-track-slot pointer-events-none"></div>
+                <input type="range" id="g-fader" class="fader" min="0" max="255" value="0">
+            </div>
+            <div class="silkscreen text-xl text-[#55ff55] pointer-events-none">G</div>
+            <div class="flex gap-1 mt-1 pointer-events-none"><div class="smd-resistor"></div><div class="smd-resistor"></div></div>
+        </div>
+
+        <!-- BLUE Slider -->
+        <div class="absolute z-20 flex flex-col items-center gap-2 interactive-comp comp-slider" style="left: 80%; top: 82%; transform: translate(-50%, -50%);" data-info="slider">
+            <input type="text" id="b-val" class="lcd-display blue font-pretendard" value="000" maxlength="3" title="클릭하여 수치 입력 (0-255)">
+            <div class="fader-container">
+                <div class="fader-track-slot pointer-events-none"></div>
+                <input type="range" id="b-fader" class="fader" min="0" max="255" value="0">
+            </div>
+            <div class="silkscreen text-xl text-[#55aaff] pointer-events-none">B</div>
+            <div class="flex gap-1 mt-1 pointer-events-none"><div class="smd-resistor"></div><div class="smd-resistor"></div></div>
+        </div>
+
+        <!-- Board Mounting Screws -->
+        <div class="screw top-3 left-3"></div>
+        <div class="screw top-3 right-3"></div>
+        <div class="screw bottom-3 left-3"></div>
+        <div class="screw bottom-3 right-3"></div>
+    </div>
+
+    <!-- Info Modal Overlay -->
+    <div id="info-modal" class="fixed inset-0 bg-black/80 hidden flex justify-center items-center z-50 opacity-0 transition-opacity duration-300">
+        <div class="bg-[#111] border border-[#333] rounded-xl p-6 max-w-[320px] w-[90%] shadow-[0_0_40px_rgba(0,0,0,0.8)] relative transform scale-95 transition-transform duration-300" id="modal-content">
+            <button id="close-modal" class="absolute top-3 right-4 text-gray-400 hover:text-white text-2xl font-bold">&times;</button>
+            <!-- 제목은 기존 JetBrains Mono 유지, 색상만 동적 할당 -->
+            <h2 id="modal-title" class="text-xl font-bold mb-4 font-['JetBrains_Mono'] border-b border-[#333] pb-2"></h2>
+            <!-- 팝업 본문 글꼴을 Pretendard (중간 굵기)로 설정 -->
+            <p id="modal-desc" class="text-gray-300 text-[15px] font-medium leading-relaxed break-keep font-pretendard"></p>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const rFader = document.getElementById('r-fader');
+        const gFader = document.getElementById('g-fader');
+        const bFader = document.getElementById('b-fader');
+        const rVal = document.getElementById('r-val');
+        const gVal = document.getElementById('g-val');
+        const bVal = document.getElementById('b-val');
+        const diodeGrid = document.getElementById('diode-grid');
+        const diffuserLens = document.getElementById('diffuser-lens');
+        const toggleLensBtn = document.getElementById('toggle-lens');
+        
+        // Modal Elements
+        const modal = document.getElementById('info-modal');
+        const modalContent = document.getElementById('modal-content');
+        const mTitle = document.getElementById('modal-title');
+        const mDesc = document.getElementById('modal-desc');
+
+        // Modal Data (제목 괄호 및 영문 제거, LED만 제외)
+        const infoData = {
+            'battery': { 
+                title: '전력원', 
+                desc: '회로에 전력을 공급하는 전원입니다. 이 시뮬레이터에서는 전체 시스템이 작동할 수 있도록 에너지를 제공합니다.',
+                colorClass: 'text-red-400'
+            },
+            'mcu': { 
+                title: '제어부', 
+                desc: '슬라이더에서 입력받은 아날로그 신호를 처리하여 LED로 전달하는 마이크로컨트롤러(IC)입니다. 각 색상의 빛의 세기를 제어하는 두뇌 역할을 합니다.',
+                colorClass: 'text-blue-400'
+            },
+            'trace': { 
+                title: '회로 패턴', 
+                desc: '부품 간에 전기적 신호와 전력을 전달하는 구리 회로 패턴입니다. 단선 없이 부품과 부품을 완벽하게 이어줍니다.',
+                colorClass: 'text-yellow-500'
+            },
+            'led': { 
+                title: '출력부 (RGB LED)', 
+                desc: 'Red, Green, Blue 빛을 내는 미세한 다이오드들이 배열되어 있습니다. 세 가지 빛이 확산 렌즈를 통해 물리적으로 혼합되어 하나의 색상으로 보이게 됩니다.',
+                colorClass: 'text-purple-400'
+            },
+            'slider': { 
+                title: '전압 조절기', 
+                desc: 'R, G, B 각 채널의 전압(0~255)을 조절하는 가변 저항기(슬라이더)입니다. 수치를 높일수록 해당 색상의 빛이 강해집니다.',
+                colorClass: 'text-green-400'
+            }
+        };
+
+        // --- 1. System Initialization ---
+        
+        function buildDiodeMatrix() {
+            const size = 8;
+            const sequence = ['r', 'g', 'b'];
+            let seqIndex = 0;
+            for (let i = 0; i < size * size; i++) {
+                const color = sequence[seqIndex];
+                const diode = document.createElement('div');
+                diode.className = `diode ${color}-die`;
+                diodeGrid.appendChild(diode);
+                seqIndex = (seqIndex + 1) % 3;
+            }
+        }
+
+        function formatVal(val) {
+            return val.toString().padStart(3, '0');
+        }
+
+        // --- 2. Real-time Circuit Simulation Logic ---
+
+        function updateCircuit() {
+            const r = parseInt(rFader.value, 10);
+            const g = parseInt(gFader.value, 10);
+            const b = parseInt(bFader.value, 10);
+
+            // 사용자가 텍스트 입력창을 사용 중이지 않을 때만 LCD 텍스트 업데이트
+            if (document.activeElement !== rVal) rVal.value = formatVal(r);
+            if (document.activeElement !== gVal) gVal.value = formatVal(g);
+            if (document.activeElement !== bVal) bVal.value = formatVal(b);
+
+            // 렌더링을 위한 CSS 변수 업데이트
+            document.documentElement.style.setProperty('--val-r', r / 255);
+            document.documentElement.style.setProperty('--val-g', g / 255);
+            document.documentElement.style.setProperty('--val-b', b / 255);
+
+            const combinedColor = `rgb(${r}, ${g}, ${b})`;
+            document.documentElement.style.setProperty('--rgb-color', combinedColor);
+            
+            // 발광 효과 확산 범위 계산
+            const luminance = (0.299*r + 0.587*g + 0.114*b);
+            const spread = (luminance / 255) * 80;
+            document.documentElement.style.setProperty('--glow-spread', `${spread}px`);
+        }
+
+        // --- 3. Direct Value Input Logic ---
+
+        function handleTextInputConstraints(e) {
+            e.target.value = e.target.value.replace(/[^0-9]/g, ''); // 숫자 외 입력 방지
+        }
+
+        function applyTextInputValue(inputNode, faderNode) {
+            let val = parseInt(inputNode.value, 10);
+            if (isNaN(val)) val = 0;
+            if (val < 0) val = 0;
+            if (val > 255) val = 255;
+            
+            faderNode.value = val;
+            inputNode.value = formatVal(val);
+            updateCircuit();
+        }
+
+        [
+            { input: rVal, fader: rFader },
+            { input: gVal, fader: gFader },
+            { input: bVal, fader: bFader }
+        ].forEach(pair => {
+            pair.fader.addEventListener('input', updateCircuit);
+            pair.input.addEventListener('click', () => pair.input.select());
+            pair.input.addEventListener('input', handleTextInputConstraints);
+            pair.input.addEventListener('blur', () => applyTextInputValue(pair.input, pair.fader));
+            pair.input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') pair.input.blur();
+            });
+        });
+
+        // --- 4. Interactive Info Modal Logic ---
+
+        function showModal(type) {
+            const data = infoData[type];
+            if (!data) return;
+            
+            mTitle.textContent = data.title;
+            // 테마 색상 클래스 동적 할당
+            mTitle.className = `text-xl font-bold mb-4 font-['JetBrains_Mono'] border-b border-[#333] pb-2 ${data.colorClass}`;
+            mDesc.textContent = data.desc;
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                modalContent.classList.remove('scale-95');
+                modalContent.classList.add('scale-100');
+            });
+        }
+
+        function hideModal() {
+            modal.classList.add('opacity-0');
+            modalContent.classList.remove('scale-100');
+            modalContent.classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+        }
+
+        // 모든 상호작용 컴포넌트에 클릭 이벤트 리스너 부착
+        document.querySelectorAll('.interactive-comp').forEach(comp => {
+            comp.addEventListener('click', (e) => {
+                // INPUT, BUTTON, 직접 입력창 등의 클릭은 모달을 띄우지 않음
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+                
+                // data-info 속성 값을 가져와 모달 표시
+                const type = e.currentTarget.dataset.info;
+                showModal(type);
+            });
+        });
+
+        document.getElementById('close-modal').addEventListener('click', hideModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
+
+        // 디퓨저 렌즈 토글
+        let isLensOn = true;
+        toggleLensBtn.addEventListener('click', () => {
+            isLensOn = !isLensOn;
+            diffuserLens.style.backdropFilter = isLensOn ? 'blur(8px)' : 'blur(0px)';
+            diffuserLens.style.webkitBackdropFilter = isLensOn ? 'blur(8px)' : 'blur(0px)';
+            diffuserLens.style.opacity = isLensOn ? '1' : '0.2';
+            toggleLensBtn.style.color = isLensOn ? '#fff' : '#aaa';
+        });
+
+        // 초기화
+        buildDiodeMatrix();
+        updateCircuit();
+
+    </script>
+</body>
+</html>
